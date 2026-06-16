@@ -1,14 +1,31 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import StatusPanel from '@/components/StatusPanel.vue'
 import ActionButtons from '@/components/ActionButtons.vue'
 import EventLog from '@/components/EventLog.vue'
 import GameOverModal from '@/components/GameOverModal.vue'
 import { useGame } from '@/composables/useGame'
+import type { ActionType } from '@/types/game'
 
-const { state, highScore, canPerformAction, gatherWood, gatherStone, hunt, drink, restart } = useGame()
+const { state, highScore, canPerformAction, getActionEstimate, gatherWood, gatherStone, hunt, drink, restart } = useGame()
+
+const hoveredAction = ref<ActionType | null>(null)
 
 const isNewRecord = computed(() => state.value.turn >= highScore.value && state.value.turn > 0)
+
+const woodEstimate = computed(() => getActionEstimate('gatherWood'))
+const stoneEstimate = computed(() => getActionEstimate('gatherStone'))
+const huntEstimate = computed(() => getActionEstimate('hunt'))
+const drinkEstimate = computed(() => getActionEstimate('drink'))
+
+const hoveredEstimate = computed(() => {
+  if (!hoveredAction.value) return null
+  return getActionEstimate(hoveredAction.value)
+})
+
+function handleHoverAction(action: ActionType | null) {
+  hoveredAction.value = action
+}
 </script>
 
 <template>
@@ -45,6 +62,7 @@ const isNewRecord = computed(() => state.value.turn >= highScore.value && state.
             :thirst="state.thirst"
             :wood="state.wood"
             :stone="state.stone"
+            :hovered-estimate="hoveredEstimate"
           />
         </div>
 
@@ -55,10 +73,15 @@ const isNewRecord = computed(() => state.value.turn >= highScore.value && state.
             :can-hunt="canPerformAction('hunt')"
             :can-drink="canPerformAction('drink')"
             :disabled="state.isGameOver"
+            :wood-estimate="woodEstimate"
+            :stone-estimate="stoneEstimate"
+            :hunt-estimate="huntEstimate"
+            :drink-estimate="drinkEstimate"
             @gather-wood="gatherWood"
             @gather-stone="gatherStone"
             @hunt="hunt"
             @drink="drink"
+            @hover-action="handleHoverAction"
           />
         </div>
 

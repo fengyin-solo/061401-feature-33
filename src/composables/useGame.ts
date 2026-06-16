@@ -1,19 +1,64 @@
-import { ref, computed, watch } from 'vue'
-import type { GameState, LogEntry, RandomEvent, ActionType, ActionEffect } from '@/types/game'
+import { ref, computed } from 'vue'
+import type {
+  GameState,
+  LogEntry,
+  RandomEvent,
+  ActionType,
+  ActionEffect,
+  ActionEffectRange,
+  ActionEstimate,
+  StatKey,
+  SideEffect,
+} from '@/types/game'
 import { randomEvents } from '@/data/events'
 
 const STORAGE_KEY_HIGH_SCORE = 'survival_game_high_score'
 const MAX_STAT = 100
 
-const actionEffects: Record<ActionType, ActionEffect> = {
+const actionEffectRanges: Record<ActionType, ActionEffectRange> = {
   gatherWood: {
-    health: -5, hunger: 5, thirst: 3, wood: 10, stone: 0 },
+    health: { min: -7, max: -3 },
+    hunger: { min: 3, max: 7 },
+    thirst: { min: 2, max: 5 },
+    wood: { min: 8, max: 14 },
+  },
   gatherStone: {
-    health: -8, hunger: 6, thirst: 4, wood: 0, stone: 8 },
+    health: { min: -12, max: -5 },
+    hunger: { min: 4, max: 8 },
+    thirst: { min: 3, max: 6 },
+    stone: { min: 6, max: 12 },
+  },
   hunt: {
-    health: 15, hunger: -20, thirst: 5, wood: -5, stone: 0 },
+    health: { min: 10, max: 22 },
+    hunger: { min: -28, max: -14 },
+    thirst: { min: 3, max: 7 },
+    wood: { min: -8, max: -3 },
+  },
   drink: {
-    health: 0, hunger: 2, thirst: -25, wood: -3, stone: 0 },
+    hunger: { min: 1, max: 3 },
+    thirst: { min: -32, max: -18 },
+    wood: { min: -5, max: -2 },
+  },
+}
+
+const actionSideEffects: Record<ActionType, SideEffect[]> = {
+  gatherWood: [
+    { stat: 'health', description: '可能被树枝划伤', severity: 'low', probability: 0.15 },
+    { stat: 'hunger', description: '体力消耗可能超出预期', severity: 'low', probability: 0.1 },
+  ],
+  gatherStone: [
+    { stat: 'health', description: '可能被落石砸伤', severity: 'medium', probability: 0.2 },
+    { stat: 'health', description: '可能扭伤肌肉', severity: 'low', probability: 0.15 },
+  ],
+  hunt: [
+    { stat: 'health', description: '猎物可能反击造成重伤', severity: 'high', probability: 0.2 },
+    { stat: 'wood', description: '可能丢失部分箭矢', severity: 'low', probability: 0.25 },
+    { stat: 'hunger', description: '可能空手而归', severity: 'medium', probability: 0.15 },
+  ],
+  drink: [
+    { stat: 'health', description: '水可能不干净导致腹泻', severity: 'medium', probability: 0.12 },
+    { stat: 'thirst', description: '水源可能不足', severity: 'low', probability: 0.08 },
+  ],
 }
 
 const actionNames: Record<ActionType, string> = {
@@ -21,6 +66,62 @@ const actionNames: Record<ActionType, string> = {
   gatherStone: '采集石头',
   hunt: '打猎',
   drink: '喝水',
+}
+
+const statLabels: Record<StatKey, string> = {
+  health: '生命',
+  hunger: '饥饿',
+  thirst: '口渴',
+  wood: '木材',
+  stone: '石头',
+}
+
+const reverseStats: StatKey[] = ['hunger', 'thirst']
+
+function randomInRange(min: number, max: number): number {
+  return Math.floor(Math.random() * (max - min + 1)) + min
+}
+
+function rollSideEffects(action: ActionType): ActionEffect {
+  const effects: ActionEffect = {}
+  const sideEffects = actionSideEffects[action]
+  for (const se of sideEffects) {
+    if (Math.random() < se.probability) {
+      let modifier = 0
+      if (se.stat === 'health') {
+        modifier = se.severity === 'low' ? -3 : se.severity === 'medium' ? -7 : -15
+      } else if (se.stat === 'hunger') {
+        modifier = se.severity === 'low' ? 3 : se.severity === 'medium' ? 6 : 10
+        if (action === 'hunt') modifier = -modifier
+      } else if (se.stat === 'thirst') {
+        modifier = se.severity === 'low' ? 3 : se.severity === 'medium' ? 6 : 10
+        if (action === 'drink') modifier = -modifier
+      } else if (se.stat === 'wood') {
+        modifier = se.severity === 'low' ? -2 : se.severity === 'medium' ? -4 : -8
+      } else if (se.stat === 'stone') {
+        modifier = se.severity === 'low' ? -2 : se.severity === 'medium' ? -4 : -8
+      }
+      effects[se.stat] = (effects[se.stat] || 0) + modifier
+    }
+  }
+  return effects
+}
+
+function rollActionEffects(action: ActionType): ActionEffect {
+  const ranges = actionEffectRanges[action]
+  const effects: ActionEffect = {}
+  const keys: StatKey[] = ['health', 'hunger', 'thirst', 'wood', 'stone']
+  for (const key of keys) {
+    const range = ranges[key]
+    if (range) {
+      effects[key] = randomInRange(range.min, range.max)
+    }
+  }
+  const seEffects = rollSideEffects(action)
+  for (const key of Object.keys(seEffects) as StatKey[]) {
+    effects[key] = (effects[key] || 0) + seEffects[key]
+  }
+  return effects
 }
 
 export function useGame() {
@@ -109,26 +210,91 @@ export function useGame() {
     }
   }
 
+  function getActionEstimate(action: ActionType): ActionEstimate {
+    const ranges = actionEffectRanges[action]
+    const sideEffects = actionSideEffects[action]
+    const benefits: ActionEstimate['benefits'] = []
+    const costs: ActionEstimate['costs'] = []
+    const keys: StatKey[] = ['health', 'hunger', 'thirst', 'wood', 'stone']
+
+    for (const key of keys) {
+      const range = ranges[key]
+      if (!range) continue
+      const isReverse = reverseStats.includes(key)
+      if (isReverse) {
+        if (range.max < 0) {
+          benefits.push({ stat: key, range: { min: -range.max, max: -range.min }, isReverse: true })
+        } else if (range.min > 0) {
+          costs.push({ stat: key, range, isReverse: true })
+        } else {
+          if (range.min < 0) {
+            benefits.push({ stat: key, range: { min: 0, max: -range.min }, isReverse: true })
+          }
+          if (range.max > 0) {
+            costs.push({ stat: key, range: { min: 0, max: range.max }, isReverse: true })
+          }
+        }
+      } else {
+        if (range.min > 0) {
+          benefits.push({ stat: key, range })
+        } else if (range.max < 0) {
+          costs.push({ stat: key, range: { min: -range.max, max: -range.min } })
+        } else {
+          if (range.max > 0) {
+            benefits.push({ stat: key, range: { min: 0, max: range.max } })
+          }
+          if (range.min < 0) {
+            costs.push({ stat: key, range: { min: 0, max: -range.min } })
+          }
+        }
+      }
+    }
+
+    return {
+      type: action,
+      name: actionNames[action],
+      benefits,
+      costs,
+      sideEffects,
+    }
+  }
+
   function canPerformAction(action: ActionType): boolean {
     if (state.value.isGameOver) return false
-    const effects = actionEffects[action]
-    if (effects.wood !== undefined && state.value.wood + effects.wood < 0) {
+    const ranges = actionEffectRanges[action]
+    if (ranges.wood && ranges.wood.min < 0 && state.value.wood + ranges.wood.min < 0) {
       return false
     }
-    if (effects.stone !== undefined && state.value.stone + effects.stone < 0) {
+    if (ranges.stone && ranges.stone.min < 0 && state.value.stone + ranges.stone.min < 0) {
       return false
     }
     return true
   }
 
+  function formatEffectValue(key: StatKey, value: number): string {
+    const label = statLabels[key]
+    const isReverse = reverseStats.includes(key)
+    const sign = isReverse ? (value < 0 ? '+' : '-') : (value > 0 ? '+' : '')
+    return `${label}${sign}${Math.abs(value)}`
+  }
+
   function performAction(action: ActionType) {
     if (!canPerformAction(action)) return
 
-    const effects = actionEffects[action]
+    const effects = rollActionEffects(action)
+    const effectSummary: string[] = []
+    const keys: StatKey[] = ['health', 'hunger', 'thirst', 'wood', 'stone']
+    for (const key of keys) {
+      const v = effects[key]
+      if (v !== undefined && v !== 0) {
+        effectSummary.push(formatEffectValue(key, v))
+      }
+    }
+
     applyEffects(effects)
     state.value.turn++
 
-    addLog(`第 ${state.value.turn} 回合：${actionNames[action]}`, 'action')
+    addLog(`第 ${state.value.turn} 回合：${actionNames[action]}（${effectSummary.join('，')}）`, 'action')
 
     const event = getRandomEvent()
     applyEffects(event.effects)
@@ -178,6 +344,9 @@ export function useGame() {
     highScore,
     canAct,
     canPerformAction,
+    getActionEstimate,
+    statLabels,
+    reverseStats,
     gatherWood,
     gatherStone,
     hunt,

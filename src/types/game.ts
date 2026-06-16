@@ -38,3 +38,33 @@ export interface ActionEffect {
   wood?: number
   stone?: number
 }
+
+export interface EffectRange {
+  min: number
+  max: number
+}
+
+export interface ActionEffectRange {
+  health?: EffectRange
+  hunger?: EffectRange
+  thirst?: EffectRange
+  wood?: EffectRange
+  stone?: EffectRange
+}
+
+export type StatKey = 'health' | 'hunger' | 'thirst' | 'wood' | 'stone'
+
+export interface SideEffect {
+  stat: StatKey
+  description: string
+  severity: 'low' | 'medium' | 'high'
+  probability: number
+}
+
+export interface ActionEstimate {
+  type: ActionType
+  name: string
+  benefits: { stat: StatKey; range: EffectRange; isReverse?: boolean }[]
+  costs: { stat: StatKey; range: EffectRange; isReverse?: boolean }[]
+  sideEffects: SideEffect[]
+}
