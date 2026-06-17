@@ -13,6 +13,13 @@ interface StatItem {
   key: StatKey
 }
 
+interface StatDelta {
+  min: number
+  max: number
+  display: string
+  color: string
+}
+
 interface Props {
   health: number
   hunger: number
@@ -26,10 +33,10 @@ const props = withDefaults(defineProps<Props>(), {
   hoveredEstimate: null,
 })
 
-const stats = computed<StatItem[]>(() => [
+const statConfigs: StatItem[] = [
   {
     label: '生命值',
-    value: props.health,
+    value: 0,
     max: 100,
     icon: '❤️',
     color: 'text-red-400',
@@ -38,7 +45,7 @@ const stats = computed<StatItem[]>(() => [
   },
   {
     label: '饥饿值',
-    value: props.hunger,
+    value: 0,
     max: 100,
     icon: '🍖',
     color: 'text-orange-400',
@@ -48,7 +55,7 @@ const stats = computed<StatItem[]>(() => [
   },
   {
     label: '口渴值',
-    value: props.thirst,
+    value: 0,
     max: 100,
     icon: '💧',
     color: 'text-blue-400',
@@ -58,7 +65,7 @@ const stats = computed<StatItem[]>(() => [
   },
   {
     label: '木材',
-    value: props.wood,
+    value: 0,
     max: 100,
     icon: '🪵',
     color: 'text-amber-600',
@@ -67,33 +74,54 @@ const stats = computed<StatItem[]>(() => [
   },
   {
     label: '石头',
-    value: props.stone,
+    value: 0,
     max: 100,
     icon: '🪨',
     color: 'text-gray-400',
     barColor: 'bg-gray-400',
     key: 'stone',
   },
-])
+]
 
-function getBarWidth(value: number, max: number): string {
-  const percent = Math.max(0, Math.min(100, (value / max) * 100))
-  return `${percent}%`
-}
+const stats = computed(() => {
+  return statConfigs.map(config => ({
+    ...config,
+    value: getStatValue(config.key),
+  }))
+})
 
-function isDanger(value: number, max: number, isReverse?: boolean): boolean {
-  const percent = (value / max) * 100
-  if (isReverse) {
-    return percent >= 80
+const deltas = computed<Record<StatKey, StatDelta | null>>(() => {
+  const result: Record<StatKey, StatDelta | null> = {
+    health: null,
+    hunger: null,
+    thirst: null,
+    wood: null,
+    stone: null,
   }
-  return percent <= 20
+
+  if (!props.hoveredEstimate) return result
+
+  const keys: StatKey[] = ['health', 'hunger', 'thirst', 'wood', 'stone']
+  for (const key of keys) {
+    result[key] = calculateDelta(key, props.hoveredEstimate)
+  }
+  return result
+})
+
+function getStatValue(key: StatKey): number {
+  switch (key) {
+    case 'health': return props.health
+    case 'hunger': return props.hunger
+    case 'thirst': return props.thirst
+    case 'wood': return props.wood
+    case 'stone': return props.stone
+  }
 }
 
-function getEstimateForStat(key: StatKey): { min: number; max: number } | null {
-  if (!props.hoveredEstimate) return null
+function calculateDelta(key: StatKey, estimate: ActionEstimate): StatDelta | null {
   const isReverse = key === 'hunger' || key === 'thirst'
-  const benefit = props.hoveredEstimate.benefits.find(b => b.stat === key)
-  const cost = props.hoveredEstimate.costs.find(c => c.stat === key)
+  const benefit = estimate.benefits.find(b => b.stat === key)
+  const cost = estimate.costs.find(c => c.stat === key)
 
   let minDelta = 0
   let maxDelta = 0
@@ -118,7 +146,13 @@ function getEstimateForStat(key: StatKey): { min: number; max: number } | null {
   }
 
   if (minDelta === 0 && maxDelta === 0) return null
-  return { min: minDelta, max: maxDelta }
+
+  return {
+    min: minDelta,
+    max: maxDelta,
+    display: formatDelta(minDelta, maxDelta, isReverse),
+    color: getDeltaColor(minDelta, maxDelta, isReverse),
+  }
 }
 
 function formatDelta(min: number, max: number, isReverse?: boolean): string {
@@ -128,13 +162,17 @@ function formatDelta(min: number, max: number, isReverse?: boolean): string {
     }
     return val > 0 ? '+' : val < 0 ? '-' : ''
   }
+  const absMin = Math.abs(min)
+  const absMax = Math.abs(max)
+  const displayMin = Math.min(absMin, absMax)
+  const displayMax = Math.max(absMin, absMax)
   if (min === max) {
-    return `${sign(min)}${Math.abs(min)}`
+    return `${sign(min)}${absMin}`
   }
   if (sign(min) === sign(max)) {
-    return `${sign(min)}${Math.abs(min)}~${Math.abs(max)}`
+    return `${sign(min)}${displayMin}~${displayMax}`
   }
-  return `${sign(min)}${Math.abs(min)} ~ ${sign(max)}${Math.abs(max)}`
+  return `${sign(min)}${absMin} ~ ${sign(max)}${absMax}`
 }
 
 function getDeltaColor(min: number, max: number, isReverse?: boolean): string {
@@ -146,6 +184,19 @@ function getDeltaColor(min: number, max: number, isReverse?: boolean): string {
     if (max < 0) return 'text-red-400'
   }
   return 'text-yellow-400'
+}
+
+function getBarWidth(value: number, max: number): string {
+  const percent = Math.max(0, Math.min(100, (value / max) * 100))
+  return `${percent}%`
+}
+
+function isDanger(value: number, max: number, isReverse?: boolean): boolean {
+  const percent = (value / max) * 100
+  if (isReverse) {
+    return percent >= 80
+  }
+  return percent <= 20
 }
 </script>
 
@@ -161,7 +212,7 @@ function getDeltaColor(min: number, max: number, isReverse?: boolean): string {
     <div class="space-y-4">
       <div
         v-for="stat in stats"
-        :key="stat.label"
+        :key="stat.key"
         class="group"
       >
         <div class="flex items-center justify-between mb-1.5">
@@ -170,18 +221,13 @@ function getDeltaColor(min: number, max: number, isReverse?: boolean): string {
             <span :class="[stat.color, 'font-medium text-sm']">{{ stat.label }}</span>
           </div>
           <div class="flex items-center gap-2">
-            <span
-              v-if="getEstimateForStat(stat.key)"
-              :class="[
-                getDeltaColor(
-                  getEstimateForStat(stat.key)!.min,
-                  getEstimateForStat(stat.key)!.max,
-                  stat.isReverse,
-                ),
-                'font-medium text-xs tabular-nums',
-              ]">
-              {{ formatDelta(getEstimateForStat(stat.key)!.min, getEstimateForStat(stat.key)!.max, stat.isReverse) }}
-            </span>
+            <template v-if="deltas[stat.key]">
+              <span
+                :class="[deltas[stat.key]!.color, 'font-medium text-xs tabular-nums']">
+                {{ deltas[stat.key]!.display }}
+              </span>
+              <span class="text-gray-600 text-xs">|</span>
+            </template>
             <span
               :class="[
                 stat.color,

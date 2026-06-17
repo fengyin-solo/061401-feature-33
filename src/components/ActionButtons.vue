@@ -1,15 +1,13 @@
 <script setup lang="ts">
-import type { ActionEstimate, StatKey } from '@/types/game'
+import { computed } from 'vue'
+import type { ActionEstimate, StatKey, ActionType } from '@/types/game'
 
-interface ActionButton {
-  type: string
+interface ActionButtonConfig {
+  type: ActionType
   label: string
   icon: string
-  action: () => void
-  disabled: boolean
   bgClass: string
   hoverClass: string
-  estimate: ActionEstimate
 }
 
 interface Props {
@@ -31,7 +29,7 @@ const emit = defineEmits<{
   gatherStone: []
   hunt: []
   drink: []
-  hoverAction: [action: 'gatherWood' | 'gatherStone' | 'hunt' | 'drink' | null]
+  hoverAction: [action: ActionType | null]
 }>()
 
 const statIcons: Record<StatKey, string> = {
@@ -50,62 +48,79 @@ const statColors: Record<StatKey, string> = {
   stone: 'text-gray-400',
 }
 
-function formatRange(min: number, max: number): string {
-  if (min === max) {
-    return String(min)
-  }
-  return `${min}~${max}`
-}
-
-const buttons: ActionButton[] = [
+const buttonConfigs: ActionButtonConfig[] = [
   {
     type: 'gatherWood',
     label: '采集木头',
     icon: '🪵',
-    action: () => emit('gatherWood'),
-    disabled: false,
     bgClass: 'bg-amber-900/40',
     hoverClass: 'hover:bg-amber-800/60',
-    get estimate() { return props.woodEstimate },
   },
   {
     type: 'gatherStone',
     label: '采集石头',
     icon: '🪨',
-    action: () => emit('gatherStone'),
-    disabled: false,
     bgClass: 'bg-gray-700/40',
     hoverClass: 'hover:bg-gray-600/60',
-    get estimate() { return props.stoneEstimate },
   },
   {
     type: 'hunt',
     label: '打猎',
     icon: '🏹',
-    action: () => emit('hunt'),
-    disabled: false,
     bgClass: 'bg-red-900/40',
     hoverClass: 'hover:bg-red-800/60',
-    get estimate() { return props.huntEstimate },
   },
   {
     type: 'drink',
     label: '喝水',
     icon: '💧',
-    action: () => emit('drink'),
-    disabled: false,
     bgClass: 'bg-blue-900/40',
     hoverClass: 'hover:bg-blue-800/60',
-    get estimate() { return props.drinkEstimate },
   },
 ]
 
-function isButtonDisabled(index: number): boolean {
-  if (props.disabled) return true
-  if (index === 0) return !props.canGatherWood
-  if (index === 1) return !props.canGatherStone
-  if (index === 2) return !props.canHunt
-  return !props.canDrink
+function getEstimate(type: ActionType): ActionEstimate {
+  switch (type) {
+    case 'gatherWood': return props.woodEstimate
+    case 'gatherStone': return props.stoneEstimate
+    case 'hunt': return props.huntEstimate
+    case 'drink': return props.drinkEstimate
+  }
+}
+
+function getCanPerform(type: ActionType): boolean {
+  if (props.disabled) return false
+  switch (type) {
+    case 'gatherWood': return props.canGatherWood
+    case 'gatherStone': return props.canGatherStone
+    case 'hunt': return props.canHunt
+    case 'drink': return props.canDrink
+  }
+}
+
+function handleAction(type: ActionType) {
+  switch (type) {
+    case 'gatherWood': emit('gatherWood'); break
+    case 'gatherStone': emit('gatherStone'); break
+    case 'hunt': emit('hunt'); break
+    case 'drink': emit('drink'); break
+  }
+}
+
+function formatRange(min: number, max: number): string {
+  if (min === max) return String(min)
+  return `${min}~${max}`
+}
+
+function formatBenefitRange(b: { range: { min: number; max: number }; isReverse?: boolean }): string {
+  return `+${formatRange(b.range.min, b.range.max)}`
+}
+
+function formatCostRange(c: { range: { min: number; max: number }; isReverse?: boolean }): string {
+  if (c.isReverse) {
+    return `+${formatRange(c.range.min, c.range.max)}`
+  }
+  return `-${formatRange(c.range.min, c.range.max)}`
 }
 
 function getSeverityColor(severity: 'low' | 'medium' | 'high'): string {
@@ -113,6 +128,17 @@ function getSeverityColor(severity: 'low' | 'medium' | 'high'): string {
   if (severity === 'medium') return 'text-orange-500'
   return 'text-red-500'
 }
+
+const buttons = computed(() => {
+  return buttonConfigs.map(config => ({
+    ...config,
+    estimate: getEstimate(config.type),
+    canPerform: getCanPerform(config.type),
+    action: () => handleAction(config.type),
+    onMouseEnter: () => emit('hoverAction', config.type),
+    onMouseLeave: () => emit('hoverAction', null),
+  }))
+})
 </script>
 
 <template>
@@ -123,20 +149,20 @@ function getSeverityColor(severity: 'low' | 'medium' | 'high'): string {
     </h2>
     <div class="grid grid-cols-2 gap-3">
       <button
-        v-for="(btn, index) in buttons"
+        v-for="btn in buttons"
         :key="btn.type"
         @click="btn.action"
-        @mouseenter="emit('hoverAction', btn.type as 'gatherWood' | 'gatherStone' | 'hunt' | 'drink')"
-        @mouseleave="emit('hoverAction', null)"
-        :disabled="isButtonDisabled(index)"
+        @mouseenter="btn.onMouseEnter"
+        @mouseleave="btn.onMouseLeave"
+        :disabled="!btn.canPerform"
         :class="[
           btn.bgClass,
           'relative p-4 rounded-xl border border-game-border transition-all duration-200',
           'flex flex-col items-start gap-2 text-left',
-          isButtonDisabled(index)
+          !btn.canPerform
             ? 'opacity-40 cursor-not-allowed'
             : [btn.hoverClass, 'hover:scale-[1.02] hover:shadow-lg cursor-pointer active:scale-[0.98]'],
-      >
+      ]">
         <div class="flex items-center justify-between w-full">
           <span class="text-3xl">{{ btn.icon }}</span>
           <span class="text-white font-semibold text-sm">{{ btn.label }}</span>
@@ -148,9 +174,9 @@ function getSeverityColor(severity: 'low' | 'medium' | 'high'): string {
             <span
               v-for="b in btn.estimate.benefits"
               :key="b.stat"
-              :class="[statColors[b.stat], 'inline-flex items-center gap-0.5 text-[10px] bg-green-900/40 px-1.5 py-0.5 rounded']>
+              :class="[statColors[b.stat], 'inline-flex items-center gap-0.5 text-[10px] bg-green-900/40 px-1.5 py-0.5 rounded']">
               <span>{{ statIcons[b.stat] }}</span>
-              <span>+{{ formatRange(b.range.min, b.range.max) }}</span>
+              <span>{{ formatBenefitRange(b) }}</span>
             </span>
           </div>
         </div>
@@ -161,9 +187,9 @@ function getSeverityColor(severity: 'low' | 'medium' | 'high'): string {
             <span
               v-for="c in btn.estimate.costs"
               :key="c.stat"
-              :class="[statColors[c.stat], 'inline-flex items-center gap-0.5 text-[10px] bg-red-900/40 px-1.5 py-0.5 rounded']>
+              :class="[statColors[c.stat], 'inline-flex items-center gap-0.5 text-[10px] bg-red-900/40 px-1.5 py-0.5 rounded']">
               <span>{{ statIcons[c.stat] }}</span>
-              <span>-{{ formatRange(c.range.min, c.range.max) }}</span>
+              <span>{{ formatCostRange(c) }}</span>
             </span>
           </div>
         </div>
@@ -171,7 +197,7 @@ function getSeverityColor(severity: 'low' | 'medium' | 'high'): string {
         <div v-if="btn.estimate.sideEffects.length > 0" class="w-full mt-0.5">
           <div
             v-for="se in btn.estimate.sideEffects"
-            :key="se.description"
+            :key="se.stat + se.description"
             class="flex items-start gap-1 text-[10px]">
             <span :class="getSeverityColor(se.severity)">⚠</span>
             <span class="text-gray-400 truncate">{{ se.description }}</span>
